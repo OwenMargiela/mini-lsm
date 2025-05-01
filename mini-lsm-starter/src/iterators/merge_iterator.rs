@@ -59,7 +59,36 @@ pub struct MergeIterator<I: StorageIterator> {
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut heap: BinaryHeap<HeapWrapper<I>> = BinaryHeap::new();
+        if iters.is_empty() {
+            return Self {
+                iters: heap,
+                current: None,
+            };
+        }
+
+        // No iter is valid
+        if iters.iter().all(|iter| !iter.is_valid()) {
+            let mut iters = iters;
+            return Self {
+                iters: heap,
+                current: Some(HeapWrapper(0, iters.pop().unwrap())),
+            };
+        }
+
+        for (size, iter) in iters.into_iter().enumerate() {
+            if iter.is_valid() {
+                let heap_entry = HeapWrapper(size, iter);
+
+                heap.push(heap_entry);
+            }
+        }
+
+        let current = heap.pop().unwrap();
+        return Self {
+            iters: heap,
+            current: Some(current),
+        };
     }
 }
 
@@ -77,10 +106,14 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.current
+            .as_ref()
+            .map(|cur| cur.1.is_valid())
+            .unwrap_or(false)
     }
 
     fn next(&mut self) -> Result<()> {
+      
         unimplemented!()
     }
 }

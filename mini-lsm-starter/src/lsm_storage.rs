@@ -16,12 +16,13 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
@@ -294,7 +295,35 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        unimplemented!()
+        let storage_state = self.state.read();
+        let memtable = &storage_state.memtable;
+
+        if let Some(entry) = memtable.get(_key) {
+            match !entry.is_empty() {
+                true => {
+                    return Ok(Some(entry));
+                }
+                _ => {
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Searching in immutable Memetables
+        for memtable in storage_state.imm_memtables.iter() {
+            if let Some(entry) = memtable.get(_key) {
+                match !entry.is_empty() {
+                    true => {
+                        return Ok(Some(entry));
+                    }
+                    _ => {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+
+        return Ok(None);
     }
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
@@ -304,12 +333,45 @@ impl LsmStorageInner {
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        unimplemented!()
+        let size;
+        {
+            let storage_state = self.state.read();
+            let memtable = &storage_state.memtable;
+
+            memtable.put(_key, _value)?;
+            size = memtable.approximate_size();
+        }
+
+        if size >= self.options.target_sst_size {
+            if let Some(state_lock) = self.try_lock() {
+                let guard = self.state.read();
+                if guard.memtable.approximate_size() >= self.options.target_sst_size {
+                    drop(guard);
+                    self.force_freeze_memtable(&state_lock)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, ()>> {
+        let state_lock_guard = &self.state_lock;
+        if !state_lock_guard.is_locked() {
+            match state_lock_guard.try_lock() {
+                Some(state_lock) => {
+                    return Some(state_lock);
+                }
+                _ => {}
+            }
+        }
+
+        return None;
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, _key: &[u8]) -> Result<()> {
-        unimplemented!()
+        self.put(_key, &[0u8; 0])?;
+        Ok(())
     }
 
     pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
@@ -334,7 +396,29 @@ impl LsmStorageInner {
 
     /// Force freeze the current memtable to an immutable memtable
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        unimplemented!()
+        let new_mem_id = self.next_sst_id();
+        let memtable: MemTable;
+
+        let mut guard = self.state.write();
+
+        let memtable = if self.options.enable_wal {
+            Arc::new(MemTable::create_with_wal(
+                new_mem_id,
+                self.path_of_wal(new_mem_id),
+            )?)
+        } else {
+            Arc::new(MemTable::create(new_mem_id))
+        };
+
+        let mut snapshot = guard.as_ref().clone();
+        let old_memtable = std::mem::replace(&mut snapshot.memtable, memtable);
+
+        snapshot.imm_memtables.insert(0, old_memtable.clone());
+        *guard = Arc::new(snapshot.clone());
+
+        drop(guard);
+
+        Ok(())
     }
 
     /// Force flush the earliest-created immutable memtable to disk

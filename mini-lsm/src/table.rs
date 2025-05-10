@@ -201,11 +201,14 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
+
         let offset = self.block_meta[block_idx].offset;
         let offset_end = self
             .block_meta
             .get(block_idx + 1)
             .map_or(self.block_meta_offset, |x| x.offset);
+
+        
         let block_len = offset_end - offset - 4;
         let block_data_with_chksum: Vec<u8> = self
             .file

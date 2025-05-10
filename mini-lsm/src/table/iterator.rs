@@ -56,16 +56,16 @@ impl SsTableIterator {
     }
 
     fn seek_to_key_inner(table: &Arc<SsTable>, key: KeySlice) -> Result<(usize, BlockIterator)> {
-        let mut blk_idx = table.find_block_idx(key);
-        let mut blk_iter =
+        let  blk_idx = table.find_block_idx(key);
+        let  blk_iter =
             BlockIterator::create_and_seek_to_key(table.read_block_cached(blk_idx)?, key);
-        if !blk_iter.is_valid() {
-            blk_idx += 1;
-            if blk_idx < table.num_of_blocks() {
-                blk_iter =
-                    BlockIterator::create_and_seek_to_first(table.read_block_cached(blk_idx)?);
-            }
-        }
+        // if !blk_iter.is_valid() {
+        //     blk_idx += 1;
+        //     if blk_idx < table.num_of_blocks() {
+        //         blk_iter =
+        //             BlockIterator::create_and_seek_to_first(table.read_block_cached(blk_idx)?);
+        //     }
+        // }
         Ok((blk_idx, blk_iter))
     }
 

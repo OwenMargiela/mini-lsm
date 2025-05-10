@@ -15,10 +15,10 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use anyhow::{Ok, Result};
 use std::cmp::{self};
 use std::collections::BinaryHeap;
-
-use anyhow::Result;
+use std::collections::binary_heap::PeekMut;
 
 use crate::key::KeySlice;
 
@@ -79,16 +79,15 @@ impl<I: StorageIterator> MergeIterator<I> {
         for (size, iter) in iters.into_iter().enumerate() {
             if iter.is_valid() {
                 let heap_entry = HeapWrapper(size, iter);
-
                 heap.push(heap_entry);
             }
         }
 
         let current = heap.pop().unwrap();
-        return Self {
+        Self {
             iters: heap,
             current: Some(current),
-        };
+        }
     }
 }
 
@@ -98,11 +97,11 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.value()
     }
 
     fn is_valid(&self) -> bool {
@@ -113,7 +112,57 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     }
 
     fn next(&mut self) -> Result<()> {
-      
-        unimplemented!()
+        let current = self.current.as_mut().unwrap();
+
+        // Check for duplicate entries
+        while let Some(mut min_heap) = self.iters.peek_mut() {
+            if min_heap.1.key() == current.1.key() {
+                // Try to iterate through the duplicate node
+                // If not valid, remove the key
+                let res = min_heap.1.next();
+                if res.is_err() {
+                    PeekMut::pop(min_heap);
+                    return res;
+                }
+
+                if !min_heap.1.is_valid() {
+                    PeekMut::pop(min_heap);
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Iterate
+        current.1.next()?;
+
+        if !current.1.is_valid() {
+            // select a new iteraor
+            if let Some(min_heap) = self.iters.pop() {
+                *current = min_heap;
+            }
+            return Ok(());
+        }
+
+        // Compare.A Swap may be needed
+        if let Some(mut min_heap) = self.iters.peek_mut() {
+            if *current < *min_heap {
+                std::mem::swap(&mut *min_heap, current);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.iters
+            .iter()
+            .map(|x| x.1.num_active_iterators())
+            .sum::<usize>()
+            + self
+                .current
+                .as_ref()
+                .map(|x| x.1.num_active_iterators())
+                .unwrap_or(0)
     }
 }

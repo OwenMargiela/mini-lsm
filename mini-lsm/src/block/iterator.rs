@@ -124,10 +124,18 @@ impl BlockIterator {
         self.key.clear();
         self.key.append(&self.first_key.raw_ref()[..overlap_len]);
         self.key.append(key);
+
+        dbg!("Key", &self.key);
+
+        dbg!("Block data len", self.block.data.len());
+
         entry.advance(key_len);
         let value_len = entry.get_u16() as usize;
         let value_offset_begin = offset + SIZEOF_U16 + SIZEOF_U16 + key_len + SIZEOF_U16;
         let value_offset_end = value_offset_begin + value_len;
+
+        dbg!("Value", &self.value_range);
+
         self.value_range = (value_offset_begin, value_offset_end);
         entry.advance(value_len);
     }
